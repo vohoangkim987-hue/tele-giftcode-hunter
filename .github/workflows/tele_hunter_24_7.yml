@@ -1,0 +1,48 @@
+name: Tele Giftcode Hunter 24-7
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+  schedule:
+    - cron: '*/20 * * * *'
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: tele-giftcode-hunter-24-7
+  cancel-in-progress: false
+
+jobs:
+  hunt-24-7:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install telethon aiohttp cryptg
+
+      - name: Run Telegram Giftcode Hunter (24/7 Continuous Cycle)
+        env:
+          API_ID: "2040"
+          API_HASH: "b18441a1ff607e10a989891a5462e627"
+          STRING_SESSION: ${{ secrets.STRING_SESSION }}
+          SEND_MODE: "command"
+        run: |
+          timeout 19500s python -u cloud_worker.py || true
+
+      - name: Auto-Chain Next 24/7 Session
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run tele_hunter_24_7.yml --repo ${{ github.repository }} || true
