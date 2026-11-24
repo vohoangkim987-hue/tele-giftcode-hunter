@@ -5,31 +5,58 @@ on:
   push:
     branches: [ main, master ]
   schedule:
-    - cron: '*/20 * * * *'
+    - cron: '*/30 * * * *'
 
 permissions:
   actions: write
   contents: read
 
-concurrency:
-  group: tele-giftcode-hunter-24-7
-  cancel-in-progress: false
-
 jobs:
+  check-active:
+    runs-on: ubuntu-latest
+    outputs:
+      should_start: ${{ steps.check.outputs.should_start }}
+    steps:
+      - name: Check if hunter is already running
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "$EVENT_NAME" != "schedule" ]; then
+            echo "should_start=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          RUNNING_COUNT=$(gh run list --repo "${{ github.repository }}" --workflow "tele_hunter_24_7.yml" --status in_progress --json databaseId --jq 'length' || echo "1")
+          echo "Active workflow runs (including this check): $RUNNING_COUNT"
+          if [ "$RUNNING_COUNT" -le 1 ]; then
+            echo "No active hunter found -> reviving 24/7 hunter!"
+            echo "should_start=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Hunter is already active -> skipping duplicate schedule."
+            echo "should_start=false" >> "$GITHUB_OUTPUT"
+          fi
+
   hunt-24-7:
+    needs: check-active
+    if: needs.check-active.outputs.should_start == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    concurrency:
+      group: tele-giftcode-hunter-24-7
+      cancel-in-progress: false
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python with Pip Cache
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: 'pip'
 
       - name: Install dependencies
-        run: pip install telethon aiohttp cryptg
+        run: pip install -r requirements.txt
 
       - name: Run Telegram Giftcode Hunter (24/7 Continuous Cycle)
         env:
@@ -41,8 +68,8 @@ jobs:
           timeout 19500s python -u cloud_worker.py || true
 
       - name: Auto-Chain Next 24/7 Session
-        if: always()
+        if: always() && !cancelled()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh workflow run tele_hunter_24_7.yml --repo ${{ github.repository }} || true
+          gh workflow run tele_hunter_24_7.yml --repo "${{ github.repository }}" || true
